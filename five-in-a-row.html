@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Five in a Row</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 8px;
+      color: #f0c040;
+      letter-spacing: 2px;
+    }
+
+    #legend {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 8px;
+      font-size: 0.9rem;
+    }
+
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+
+    .red-dot {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #ff6b6b, #c0392b);
+      box-shadow: 0 0 4px #c0392b88;
+    }
+
+    #status {
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      min-height: 1.5em;
+      color: #ccc;
+    }
+
+    #board-wrapper {
+      overflow: auto;
+      max-width: 100vw;
+      max-height: 78vh;
+      border: 2px solid #444;
+      border-radius: 4px;
+      background: #16213e;
+    }
+
+    #board {
+      display: grid;
+      grid-template-columns: repeat(50, 18px);
+      grid-template-rows: repeat(50, 18px);
+      gap: 1px;
+      background: #2a2a4a;
+      padding: 1px;
+      cursor: pointer;
+    }
+
+    .cell {
+      width: 18px;
+      height: 18px;
+      background: #0f3460;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      line-height: 1;
+      user-select: none;
+      transition: background 0.1s;
+    }
+
+    .cell:hover:not(.taken) {
+      background: #1a4a80;
+    }
+
+    .cell.human::after {
+      content: '😊';
+    }
+
+    .cell.computer::after {
+      content: '';
+      display: block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #ff6b6b, #c0392b);
+      box-shadow: 0 0 3px #c0392b99;
+    }
+
+    .cell.win-cell {
+      background: #1b5e20 !important;
+    }
+
+    /* Result overlay */
+    #overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+    }
+
+    #overlay.show { display: flex; }
+
+    #result-box {
+      background: #16213e;
+      border: 2px solid #f0c040;
+      border-radius: 14px;
+      padding: 36px 52px;
+      text-align: center;
+    }
+
+    #result-msg {
+      font-size: 2rem;
+      color: #f0c040;
+      margin-bottom: 22px;
+    }
+
+    #restart-btn {
+      background: #f0c040;
+      color: #1a1a2e;
+      border: none;
+      padding: 10px 30px;
+      font-size: 1rem;
+      font-weight: bold;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    #restart-btn:hover { background: #ffd060; }
+  </style>
+</head>
+<body>
+
+  <h1>Five in a Row</h1>
+
+  <div id="legend">
+    <div class="legend-item"><span style="font-size:18px">😊</span> You</div>
+    <div class="legend-item"><span class="red-dot"></span> Computer</div>
+  </div>
+
+  <div id="status">Your turn — click a cell</div>
+
+  <div id="board-wrapper">
+    <div id="board"></div>
+  </div>
+
+  <div id="overlay">
+    <div id="result-box">
+      <div id="result-msg"></div>
+      <button id="restart-btn">Play Again</button>
+    </div>
+  </div>
+
+<script>
+  const ROWS = 50, COLS = 50, WIN = 5;
+  const HUMAN = 1, COMP = 2;
+
+  let board, turn, over;
+
+  // ── Build DOM board once ─────────────────────────────────────────────────
+  const boardEl = document.getElementById('board');
+
+  function buildBoard() {
+    boardEl.innerHTML = '';
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const div = document.createElement('div');
+        div.className = 'cell';
+        div.dataset.r = r;
+        div.dataset.c = c;
+        boardEl.appendChild(div);
+      }
+    }
+  }
+
+  function cellEl(r, c) {
+    return boardEl.children[r * COLS + c];
+  }
+
+  // ── Game state ───────────────────────────────────────────────────────────
+  function initGame() {
+    board = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+    turn = HUMAN;
+    over = false;
+    document.getElementById('overlay').classList.remove('show');
+    document.getElementById('status').textContent = 'Your turn — click a cell';
+    // Clear visual state
+    for (let i = 0; i < boardEl.children.length; i++) {
+      boardEl.children[i].className = 'cell';
+    }
+  }
+
+  buildBoard();
+  initGame();
+
+  // ── Click handler ────────────────────────────────────────────────────────
+  boardEl.addEventListener('click', e => {
+    if (over || turn !== HUMAN) return;
+    const cell = e.target.closest('.cell');
+    if (!cell || cell.classList.contains('taken')) return;
+    place(+cell.dataset.r, +cell.dataset.c, HUMAN);
+  });
+
+  document.getElementById('restart-btn').addEventListener('click', initGame);
+
+  // ── Place a piece ────────────────────────────────────────────────────────
+  function place(r, c, player) {
+    board[r][c] = player;
+    const el = cellEl(r, c);
+    el.classList.add(player === HUMAN ? 'human' : 'computer', 'taken');
+
+    const win = findWin(r, c, player);
+    if (win) {
+      win.forEach(([wr, wc]) => cellEl(wr, wc).classList.add('win-cell'));
+      over = true;
+      endGame(player === HUMAN ? '😊 You win!' : '🔴 Computer wins!');
+      return;
+    }
+
+    if (isFull()) { endGame("It's a draw!"); return; }
+
+    if (player === HUMAN) {
+      turn = COMP;
+      document.getElementById('status').textContent = 'Computer is thinking…';
+      setTimeout(compMove, 60);
+    } else {
+      turn = HUMAN;
+      document.getElementById('status').textContent = 'Your turn — click a cell';
+    }
+  }
+
+  function endGame(msg) {
+    over = true;
+    document.getElementById('result-msg').textContent = msg;
+    document.getElementById('overlay').classList.add('show');
+  }
+
+  function isFull() {
+    return board.every(row => row.every(v => v !== 0));
+  }
+
+  // ── Win detection ────────────────────────────────────────────────────────
+  const DIRS = [[0,1],[1,0],[1,1],[1,-1]];
+
+  function findWin(r, c, p) {
+    for (const [dr, dc] of DIRS) {
+      const line = [[r, c]];
+      for (let d = 1; d < WIN; d++) {
+        const nr = r + dr*d, nc = c + dc*d;
+        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS || board[nr][nc] !== p) break;
+        line.push([nr, nc]);
+      }
+      for (let d = 1; d < WIN; d++) {
+        const nr = r - dr*d, nc = c - dc*d;
+        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS || board[nr][nc] !== p) break;
+        line.push([nr, nc]);
+      }
+      if (line.length >= WIN) return line;
+    }
+    return null;
+  }
+
+  // ── Medium AI ────────────────────────────────────────────────────────────
+  function compMove() {
+    const [r, c] = bestMove();
+    place(r, c, COMP);
+  }
+
+  // Score a line through (r,c) in direction (dr,dc) for `player`
+  function scoreLine(r, c, dr, dc, player) {
+    let count = 1, open = 0;
+    for (let d = 1; d < WIN; d++) {
+      const nr = r + dr*d, nc = c + dc*d;
+      if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) break;
+      if (board[nr][nc] === player) count++;
+      else { if (board[nr][nc] === 0) open++; break; }
+    }
+    for (let d = 1; d < WIN; d++) {
+      const nr = r - dr*d, nc = c - dc*d;
+      if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) break;
+      if (board[nr][nc] === player) count++;
+      else { if (board[nr][nc] === 0) open++; break; }
+    }
+    if (count >= WIN) return 1_000_000;
+    if (open === 0) return 0;
+    return [0, 1, 10, 100, 1000, 100_000][Math.min(count, 5)] * open;
+  }
+
+  function scorePos(r, c, player) {
+    let s = 0;
+    for (const [dr, dc] of DIRS) s += scoreLine(r, c, dr, dc, player);
+    return s;
+  }
+
+  function bestMove() {
+    // Gather candidate cells within radius 2 of any placed piece
+    const cands = new Set();
+    let any = false;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        if (board[r][c] === 0) continue;
+        any = true;
+        for (let dr = -2; dr <= 2; dr++) {
+          for (let dc = -2; dc <= 2; dc++) {
+            const nr = r+dr, nc = c+dc;
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && board[nr][nc] === 0)
+              cands.add(nr * COLS + nc);
+          }
+        }
+      }
+    }
+
+    if (!any) return [Math.floor(ROWS/2), Math.floor(COLS/2)];
+
+    let best = -Infinity, br = -1, bc = -1;
+    for (const key of cands) {
+      const r = Math.floor(key / COLS), c = key % COLS;
+
+      board[r][c] = COMP;
+      const atk = scorePos(r, c, COMP);
+      board[r][c] = 0;
+
+      board[r][c] = HUMAN;
+      const def = scorePos(r, c, HUMAN);
+      board[r][c] = 0;
+
+      // Slightly favour defence to block human threats
+      const score = Math.max(atk, def * 1.1);
+      if (score > best) { best = score; br = r; bc = c; }
+    }
+    return [br, bc];
+  }
+</script>
+</body>
+</html>
